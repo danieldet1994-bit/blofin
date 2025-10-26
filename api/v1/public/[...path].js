@@ -1,39 +1,41 @@
 // api/v1/public/[...path].js
-// Forward any /api/v1/public/* call to Blofin public REST, preserving path+query.
-
 export default async function handler(req, res) {
   try {
-    // 1) Compute tail (path AFTER /api/v1/public)
-    const urlIn = new URL(req.url, "http://localhost"); // base is ignored
+    const inUrl = new URL(req.url, "http://localhost");
     const prefix = "/api/v1/public";
-    let tail = urlIn.pathname.startsWith(prefix)
-      ? urlIn.pathname.slice(prefix.length) // keep leading '/' if present
-      : urlIn.pathname;
+    let tail = inUrl.pathname.startsWith(prefix)
+      ? inUrl.pathname.slice(prefix.length) // keep leading "/" if present
+      : inUrl.pathname;
+    if (!tail) tail = "/";
 
-    if (!tail || tail === "/") tail = "/"; // e.g. /api/v1/public -> /
-
-    // 2) Build upstream URL (preserve query string)
     const upstream = new URL(`https://openapi.blofin.com/api/v1/public${tail}`);
-    upstream.search = urlIn.search; // carry ?...
+    upstream.search = inUrl.search; // preserve ?query
 
-    // 3) Prepare headers (simple + friendly UA helps some CDNs)
+    // Headers that usually satisfy WAFs for public endpoints
     const headers = {
-      accept: "application/json",
-      "user-agent": "skyline-proxy/1.0 (+vercel)",
+      // look like a browser
+      "user-agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      "accept": "application/json, text/plain, */*",
+      "accept-language": "en-GB,en;q=0.9",
+      "cache-control": "no-cache",
+      // some WAFs insist on a same-site-ish Origin/Referer
+      "origin": "https://www.blofin.com",
+      "referer": "https://www.blofin.com/",
+      // pass through content-type on POST later if needed
+      ...(req.headers["content-type"]
+        ? { "content-type": req.headers["content-type"] }
+        : {}),
     };
-    // If client sent Content-Type (for POST later), forward it
-    const ct = req.headers["content-type"];
-    if (ct) headers["content-type"] = ct;
 
-    // 4) Forward
     const upstreamResp = await fetch(upstream.toString(), {
-      method: req.method,
+      method: "GET", // public endpoints are GET
       headers,
     });
 
     const text = await upstreamResp.text();
 
-    // 5) Try JSON first; if not JSON, pass through raw text with same status
+    // Try JSON; if not JSON, pass raw
     try {
       const json = JSON.parse(text);
       res.status(upstreamResp.status).json(json);
