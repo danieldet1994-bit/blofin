@@ -1,32 +1,40 @@
 // api/v1/public/[...path].js
-export default async function handler(req, res) {
-  const { path = [] } = req.query;
-  const tail = Array.isArray(path) ? path.join('/') : String(path || '');
-  const url = `https://openapi.blofin.com/api/v1/public/${tail}`;
+// Simple public forwarder to Blofin public API.
+// Example: /api/v1/public/time  ->  https://openapi.blofin.com/api/v1/public/time
 
+export const config = { runtime: 'nodejs' }; // or 'edge' if you prefer
+
+const BLOFIN_ROOT = 'https://openapi.blofin.com/api/v1/public';
+
+export default async function handler(req, res) {
   try {
-    const upstream = await fetch(url, {
-      method: req.method || 'GET',
-      headers: {
-        // forward only safe headers
-        'content-type': 'application/json'
-      }
+    // Build the tail path after /api/v1/public/
+    const url = new URL(req.url, 'http://localhost'); // base only to parse
+    const tail = url.pathname.replace(/^\/api\/v1\/public\/?/, ''); // e.g. "time" or "ticker/24hr"
+
+    if (!tail) {
+      res.status(400).json({ ok: false, error: 'Missing path after /public/' });
+      return;
+    }
+
+    const blofinUrl = `${BLOFIN_ROOT}/${tail}${url.search || ''}`;
+
+    const fetchRes = await fetch(blofinUrl, {
+      method: req.method,
+      headers: { 'accept': 'application/json' },
+      // No body for GET (most public endpoints are GET)
     });
 
-    // pass through status (200 expected from /time)
-    res.status(upstream.status);
-
-    // try to proxy JSON (if upstream returned text/html by mistake, just forward the text)
-    const ct = upstream.headers.get('content-type') || '';
-    if (ct.includes('application/json')) {
-      const data = await upstream.json();
-      res.json(data);
-    } else {
-      const text = await upstream.text();
-      res.setHeader('content-type', ct || 'text/plain');
-      res.send(text);
+    // Pass through status & JSON
+    const text = await fetchRes.text();
+    // Try to return JSON; if not JSON, return as text
+    try {
+      const json = JSON.parse(text);
+      res.status(fetchRes.status).json(json);
+    } catch {
+      res.status(fetchRes.status).send(text);
     }
   } catch (err) {
-    res.status(502).json({ ok: false, error: 'proxy_failed', message: String(err) });
+    res.status(500).json({ ok: false, error: String(err) });
   }
 }
