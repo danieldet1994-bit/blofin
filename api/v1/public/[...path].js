@@ -1,4 +1,4 @@
-// api/v1/public/[...path].js
+/ api/v1/public/[...path].js
 export default async function handler(req, res) {
   try {
     const base = "https://openapi.blofin.com"; // Correct base URL
