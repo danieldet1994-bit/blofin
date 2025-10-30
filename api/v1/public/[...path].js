@@ -3,29 +3,27 @@ export default async function handler(req, res) {
   try {
     const BASE = "https://openapi.blofin.com";
 
-    // Normalize: strip our prefix and ensure single slashes only
+    // Strip prefix and normalize
     const inUrl = new URL(req.url, "http://local");
-    const tail = inUrl.pathname.replace(/^\/api\/v1\/public\/?/, ""); // e.g. "time"
-    const upstreamPath = `/api/v1/public/${tail}`.replace(/\/{2,}/g, "/"); // no //
-
-    // Build upstream URL (keeps any ?query=…)
+    const tail = inUrl.pathname.replace(/^\/api\/v1\/public\/?/, "");
+    const upstreamPath = `/api/v1/public/${tail}`.replace(/\/{2,}/g, "/");
     const upstreamUrl = `${BASE}${upstreamPath}${inUrl.search || ""}`;
 
-    // Minimal, safe headers — do NOT forward cookies/origin/referer
+    // ✅ Browser-like headers (Blofin expects these)
     const headers = {
-      Accept: "application/json",
-      "User-Agent": "SkylineProxy/1.0 (+vercel)",
+      Accept: "application/json, text/plain, */*",
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+      Origin: "https://www.blofin.com",
+      Referer: "https://www.blofin.com/",
+      "Accept-Language": "en-GB,en;q=0.9",
+      ...(req.headers["content-type"]
+        ? { "Content-Type": req.headers["content-type"] }
+        : {}),
     };
-    if (req.headers["content-type"])
-      headers["Content-Type"] = req.headers["content-type"];
 
-    const r = await fetch(upstreamUrl, {
-      method: req.method,                  // GET for /time
-      headers,
-      // no body for public GETs
-    });
-
+    const r = await fetch(upstreamUrl, { method: "GET", headers });
     const text = await r.text();
+
     try {
       res.status(r.status).json(JSON.parse(text));
     } catch {
